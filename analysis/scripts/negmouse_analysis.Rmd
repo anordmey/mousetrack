@@ -1,0 +1,428 @@
+---
+title: "Dale & Duran 2011 Replication Analysis"
+author: "Ann E. Nordmeyer"
+output: html_document
+---
+
+## Getting Started 
+
+Prelims and libraries.
+
+```{r}
+#load libraries
+library(lme4)
+library(ggplot2)
+library(dplyr)
+library(bootstrap)
+```
+
+Functions for analysis.  Note that the Acceleration Components function may not be correct; the replication results in much higher AC scores than the original paper.  
+
+```{r}
+# for bootstrapping 95% confidence intervals
+theta <- function(x,xdata) {mean(xdata[x])}
+ci.low <- function(x) {
+  quantile(bootstrap(1:length(x),1000,theta,x)$thetastar,.025)}
+ci.high <- function(x) {
+  quantile(bootstrap(1:length(x),1000,theta,x)$thetastar,.975)}
+
+#count function
+n.unique <- function (x) {
+  length(unique(x))
+}
+
+#Normalize coordinates
+coords <- function(x) {
+	x-x[1]
+}
+
+#xflips counts the number of times that the trajectory changes along the x axis.
+xflips <- function(x) {
+	dx <- -diff(x) #get changes in values 
+	dx <- dx[dx!=0] #remove 0s to avoid dividing by zero
+	
+	flips <- dx/(abs(dx)) #get signs (-1 (decreasing), 0 (no change), 1 (increasing))
+	flips <- diff(flips) #subtract changes from point to point
+	xf <- length(flips[flips!=0])
+	return(xf)
+}
+
+#acceleration components counts the number of times the trajectory speeds up or slows down.
+#I'm not sure this is correct?
+AC <- function(x, y, time) {
+	dx <- diff(x)
+	dy <- diff(y)
+	dist <- sqrt(dx^2 + dy^2) #get distance between two points
+	vel <- dist/diff(time) # calculate velocity
+	acc <- diff(vel) #calculate acceleration 
+	acc <- acc[acc!=0] #remove 0s to avoid dividing by zero
+	
+	acomps <- acc/(abs(acc)) #get signs (-1 (slowing down), 0 (no change), 1 (speeding up))
+	acomps <- diff(acomps) #subtract changes from point to point
+	ac <- length(acomps[acomps!=0]) - 1 #"The subtraction of 1 is to factor out the standard change in acceleration that is seen in a basic movement" (Dale & Duran,2011)
+	return(ac)
+}
+```
+
+Loading in the data.  I did two replication attempts, each with N = 60 for each "condition" (e.g. no context vs. context, which were exp1 and exp3 in the original paper).  I'm combining these two data sets here for the purposes of these analyses (so the N in these analyses is about twice what was reported in the original paper)
+
+```{r}
+###load data and prepare data frame from rep 1
+long.data1 <- read.table("../data/negmouse.rep1.csv",
+       sep=",",header=TRUE)
+long.data1$subid <- paste(as.character(long.data1$subid),"a",sep="")
+
+###load data and prepare data frame from rep 2       
+long.data2 <- read.table("../data/negmouse.rep2.csv",
+       sep=",",header=TRUE)
+long.data2$subid <- paste(as.character(long.data2$subid),"b",sep="")
+
+##Merge two data sets for these analyses
+long.data <- rbind(long.data1, long.data2)
+```
+
+One critical difference between this replication attempt and the original paper is that the replication was run online (MTurk).  We asked about whether participants used a mouse, trackpad, or some other tool to move the cursor.  Here I remove participants who selected "other" on that question.  I'm leaving trackpad users in for now.
+
+```{r}
+long.data <- subset(long.data, mouse.type != "\"Other\"")
+```
+
+Prepping data for analysis:
+
+```{r}
+#Setting up for data analysis    
+long.data$subid <- factor(long.data$subid)
+long.data$context.condition <- factor(long.data$context.condition, levels=c("no context","context"), labels=c("No Context","Context"))
+long.data$sentence.type <- factor(long.data$sentence.type, levels=c("pos","neg"), labels=c("Positive","Negative"))
+long.data$truth.val <- factor(long.data$truth.val, levels=c("TRUE","FALSE"), labels=c("True","False"))
+long.data$mouse.type <- factor(long.data$mouse.type, levels = c("\"Mouse\"", "\"Trackpad\""), labels = c("mouse", "trackpad"))
+
+#Normalize x & y coords
+long.data <- long.data %>%
+  group_by(subid, trial.num) %>%
+  mutate(x = coords(xCoord),
+         y = coords(-1*coords(yCoord))) %>%
+  ungroup()
+```
+
+Note that X- and y- coordinates were transformed such that y-coordinates equal to 0 corresponded to the bottom of the experiment window, and x-coordinates equal to 0 corresponded to the midline. This was done to make x- and y-coordinates easier to interpret, but does not alter the analysis in any way.  
+Here I look at the raw data of a few random participants, just to make sure everything looks right.  I've transformed the data just for these plots so each subplot shows trajectories going to the left for true and to the right for false.
+
+```{r}
+subs <- long.data %>%
+  filter(subid == "100a" | subid == "45a" | subid == "65b" | subid == "92b") %>% ##Just look at a couple of participants (these are just randomly selected participants)
+  mutate(x = ifelse(left.side==FALSE, -1*x)) #Transform -1*x for any where True was on the right (so the picture always shows trajectories going to the left for true and the right for false)
+
+qplot(y=y, x=x, linetype=sentence.type, color=truth.val,
+      data=subs, geom="path") + 
+  facet_grid(subid~trial.num) +
+  theme_bw() 
+```
+
+Some final exclusion criteria based on what was used in the paper (remove participants with less than 80% correct, then remove incorrect trials and trials with motion times 3x higher than the sd).
+
+```{r}
+##Exclusion criteria
+long.data <- long.data %>%
+  group_by(subid) %>% 
+  mutate(propcorrect = mean(correct)) %>%
+  filter(propcorrect > .8) %>% #reject participants with fewer than 80% correct
+  ungroup() %>%
+  filter(correct == 1) %>% #remove all incorrect trials
+  group_by(context.condition) %>%
+  filter(rt < (mean(rt) + sd(rt)*3) & rt > (mean(rt) - sd(rt)*3)) %>% #remove trials with motion times 3 standard deviations longer than mean motion time
+  ungroup()
+
+##Final Ns:
+aggregate(subid ~ context.condition, long.data, n.unique)
+```
+
+Calculate Xflips and Acceleration Components, the two primariy analyses from the original paper.  
+
+```{r}
+###prepare data for analysis
+#calculate xflips and AC count
+#summarize data so that each row represents one trial (not one time point)
+sdata <- long.data %>%
+  group_by(context.condition, mouse.type, sentence.type, truth.val, item, subid) %>%
+  summarize(xflips = xflips(x), 
+         ac = AC(xCoord, y, timing),
+         rt = (mean(rt))) %>%
+  ungroup()
+```
+
+## Plotting data
+
+### X-flips
+
+First, compare original data to replication attempt for x-flips measure.  This is the number of times the trajectory changes direction along the x-axis.  
+
+Original means:
+
+```{r} 
+old.xf <- as.data.frame(matrix(c("Positive","Negative","Positive","Negative","Positive","Negative","Positive","Negative","True","True","False","False","True","True","False","False","No Context","No Context","No Context","No Context","Context","Context","Context","Context",1.13,1.71,1.24,1.34,1.41,1.60,1.34,1.38), nrow=8, ncol=4))
+names(old.xf) <- c("sentence.type","truth.val","context.condition","xflips")
+old.xf$xflips <- as.numeric(as.character(old.xf$xflips))
+old.xf$context.condition <- factor(old.xf$context.condition, levels=c("No Context","Context"))
+old.xf$sentence.type <- factor(old.xf$sentence.type, levels=c("Positive","Negative"))
+old.xf$truth.val <- factor(old.xf$truth.val, levels=c("True","False"))
+
+ggplot(old.xf, aes(fill=truth.val, y=xflips, x=sentence.type)) +
+	 geom_bar(position=position_dodge(), stat="identity") + 
+	 facet_grid(~ context.condition) + 
+	 coord_cartesian(ylim=c(0, 2.5)) + 
+	 xlab("Sentence Type") + 
+	 ylab("x-flips (#)") +
+	 scale_fill_grey("Response") +
+	 theme_bw()
+```
+
+Replication:
+
+```{r}
+ms.xf <- sdata %>%
+  group_by(context.condition, sentence.type, truth.val, subid) %>%
+  summarize(m = mean(xflips)) %>%
+  group_by(context.condition, sentence.type, truth.val) %>%
+  summarize(cih = ci.high(m), 
+            cil = ci.low(m), 
+            m = mean(m))
+
+ggplot(ms.xf, aes(fill=truth.val, y=m, x=sentence.type)) +
+	 geom_bar(position=position_dodge(), stat="identity") + 
+	 facet_wrap(~ context.condition) + 
+	 geom_errorbar(aes(ymax=ms.xf$cih, ymin=ms.xf$cil), position=position_dodge(.9), width=0) +
+	 coord_cartesian(ylim=c(0, 2.5)) + 
+	 xlab("Sentence Type") + 
+	 ylab("x-flips (#)") +
+	 scale_fill_grey("Response") +
+	 theme_bw() 
+```
+
+So the replication for the x-flips measure looks really good -- the means are very similar.
+
+Does it make a difference if participants are using a trackpad or a mouse?  At the very least, this seems relevant to future online mousetracking research, and possibly relevant to this replication as well.  
+
+```{r}
+aggregate(subid ~ context.condition + mouse.type, sdata, n.unique)
+```
+
+Just a note that most of our participants reported using a mouse, not a trackpad.  
+
+```{r}
+ms.xf.mouse <- sdata %>%
+  group_by(mouse.type, context.condition, sentence.type, truth.val, subid) %>%
+  summarize(m = mean(xflips)) %>%
+  group_by(mouse.type, context.condition, sentence.type, truth.val) %>%
+  summarize(cih = ci.high(m), 
+            cil = ci.low(m), 
+            m = mean(m))
+
+ggplot(ms.xf.mouse, aes(fill=truth.val, y=m, x=sentence.type)) +
+  geom_bar(position=position_dodge(), stat="identity") + 
+  facet_wrap(mouse.type ~ context.condition) + 
+  geom_errorbar(aes(ymax=ms.xf.mouse$cih, ymin=ms.xf.mouse$cil), position=position_dodge(.9), width=0) +
+  coord_cartesian(ylim=c(0, 2.5)) + 
+  xlab("Sentence Type") + 
+  ylab("x-flips (#)") +
+  scale_fill_grey("Response") +
+  theme_bw() 
+```
+
+It looks like there might be a main effect (trackpad users have fewer xflips?) but unclear whether it influences the interaction we are interested in here.
+
+### Acceleration Components
+
+Now look at AC, the other primary measure reported in the original paper.  This shows the number of times that the trajectory sped up or slowed down.
+
+Original data:
+
+```{r}
+#Original Data
+old.ac <- matrix(c("Positive","Negative","Positive","Negative","Positive","Negative","Positive","Negative","True","True","False","False","True","True","False","False","No Context","No Context","No Context","No Context","Context","Context","Context","Context",1.56,2.86,2.16,2.27,2.30,2.66,2.07,2.51), nrow=8, ncol=4)
+old.ac <- as.data.frame(old.ac)
+names(old.ac) <- c("sentence.type","truth.val","context.condition","ac")
+old.ac$ac <- as.numeric(as.character(old.ac$ac))
+old.ac$context.condition <- factor(old.ac$context.condition, levels=c("No Context","Context"))
+old.ac$sentence.type <- factor(old.ac$sentence.type, levels=c("Positive","Negative"))
+old.ac$truth.val <- factor(old.ac$truth.val, levels=c("True","False"))
+
+ggplot(old.ac, aes(fill=truth.val, y=ac, x=sentence.type)) +
+  geom_bar(position=position_dodge(), stat="identity") + 
+  facet_grid(~ context.condition) + 
+  coord_cartesian(ylim=c(0, 8)) +
+  xlab("Sentence Type") + 
+  ylab("Acceleration Components (#)") +
+  scale_fill_grey("Response") +
+  theme_bw()
+```
+
+Replication:
+
+```{r}
+ms.ac <- sdata %>%
+  group_by(context.condition, sentence.type, truth.val, subid) %>%
+  summarize(m = mean(ac)) %>%
+  group_by(context.condition, sentence.type, truth.val) %>%
+  summarize(cih = ci.high(m), 
+            cil = ci.low(m), 
+            m = mean(m))
+
+ggplot(ms.ac, aes(fill=truth.val, y=m, x=sentence.type)) +
+  geom_bar(position=position_dodge(), stat="identity") + 
+  facet_grid(~ context.condition) + 
+  geom_errorbar(aes(ymax=ms.ac$cih, ymin=ms.ac$cil), position=position_dodge(.9), width=0) +
+  coord_cartesian(ylim=c(0, 22)) + 
+  xlab("Sentence Type") +
+  ylab("Acceleration Components (#)") +
+  scale_fill_grey("Response") +
+  theme_bw()
+```
+
+Note that the reported interaction looks about the same (i.e. there is an interaction between truth value & sentence type when there is no context, but no interaction in the context condition), but there are striking differences between the means reported in the replication and the original studies.  I wonder if I'm calculating AC differently than this measure was calculated in
+the original paper?
+
+Just out of curiousity, see if mouse use had an effect here:
+
+```{r}
+ms.ac.mouse <- sdata %>%
+  group_by(mouse.type, context.condition, sentence.type, truth.val, subid) %>%
+  summarize(m = mean(ac)) %>%
+  group_by(mouse.type, context.condition, sentence.type, truth.val) %>%
+  summarize(cih = ci.high(m), 
+            cil = ci.low(m), 
+            m = mean(m))
+
+ggplot(ms.ac.mouse, aes(fill=truth.val, y=m, x=sentence.type)) +
+  geom_bar(position=position_dodge(), stat="identity") + 
+  facet_grid(mouse.type ~ context.condition) + 
+  geom_errorbar(aes(ymax=ms.ac.mouse$cih, ymin=ms.ac.mouse$cil), position=position_dodge(.9), width=.0) +
+  coord_cartesian(ylim=c(0, 22)) + 
+  xlab("Sentence Type") +
+  ylab("Acceleration Components (#)") +
+  scale_fill_grey("Response") +
+  theme_bw()
+```
+
+It doesn't really look like it -- the data looks a little wonky, I think because there are some outliers in the AC measure (most get AC scores around 5-15, but a few have much higher scores) and there are so few trackpad participants.
+
+### Reaction Time
+
+I collected "reaction time" scores, which was the time from the onset of the final word to the time that the participant selected true or false.  This was not reported in the original paper, so I don't have anything to compare it to.
+
+```{r}
+##RT
+#Original paper does not report RT means
+
+#Replication:
+ms.rt <- sdata %>%
+  group_by(context.condition, sentence.type, truth.val, subid) %>%
+  summarize(m = mean(rt)) %>%
+  group_by(context.condition, sentence.type, truth.val) %>%
+  summarize(cih = ci.high(m), 
+            cil = ci.low(m), 
+            m = mean(m))
+
+ggplot(ms.rt, aes(fill=truth.val, y=m, x=sentence.type)) +
+	 geom_bar(position=position_dodge(), stat="identity") + 
+	 facet_grid(~ context.condition) + 
+	 geom_errorbar(aes(ymax=ms.rt$cih, ymin=ms.rt$cil), position=position_dodge(.9), width=.25, size=.25) +
+	 xlab("Sentence Type") +
+	 ylab("RT") +
+	 scale_fill_grey("Response") +
+	 theme_bw()
+```
+
+Interestingly, it looks like RT does not have the expected effect -- it seems like there is the same interaction in the context condition, and participants were actually slower to respond in the context condition.  This could be because the context sentences were longer, and maybe took longer to process after reading the final word?
+
+## Mixed effects models
+
+These are all linear mixed-effects models with maximal random effects structure that converges.
+
+I split the data by condition (exp1 is the no context condition and exp3 is the context condition) because this is how the original paper's results were reported.
+
+```{r}
+sdata$truth.val = factor(sdata$truth.val, levels=c("False","True"))
+
+#split data
+exp1 <- subset(sdata, context.condition=="No Context")
+exp3 <- subset(sdata, context.condition=="Context")
+```
+
+### X-flips
+
+```{r}
+##X-FLIPS
+#EXPERIMENT 1
+xflips.exp1 <- lmer(xflips ~ sentence.type*truth.val + (sentence.type + truth.val | subid) + (truth.val | item), data=exp1)
+summary(xflips.exp1)
+
+#EXPERIMENT3
+xflips.exp3 <- lmer(xflips ~ sentence.type*truth.val + (sentence.type + truth.val | subid) + (truth.val | item), data=exp3)	
+summary(xflips.exp3)
+```
+
+This is consistent with the original findings (with a larger sample size).  There is a significant interaction between truth value and sentence type in the no context condition, but not in the context condition.
+
+What if we only look at mouse users, because original participants all used a mouse?
+
+```{r}
+#EXPERIMENT 1
+xflips.exp1.mouseonly <- lmer(xflips ~ sentence.type*truth.val + (sentence.type + truth.val | subid) + (truth.val | item), data=subset(exp1, mouse.type == "mouse"))
+summary(xflips.exp1.mouseonly)
+
+#EXPERIMENT3
+xflips.exp3.mouseonly <- lmer(xflips ~ sentence.type*truth.val + (sentence.type + truth.val | subid) + (truth.val | item), data=subset(exp3, mouse.type == "mouse"))
+summary(xflips.exp3.mouseonly)
+```
+
+The interaction is only marginally significant in the no context condition -- possibly because of smaller sample size with the trackpad participants removed, though this is still a larger N than in the original experiment.
+
+### Acceleration Components
+
+```{r}
+#EXPERIMENT 1
+ac.exp1 <- lmer(ac ~ sentence.type*truth.val + (sentence.type*truth.val | subid) + (truth.val | item), data=exp1)
+summary(ac.exp1)
+
+##EXPERIMENT 3
+ac.exp3 <- lmer(ac ~ sentence.type*truth.val + (sentence.type*truth.val | subid) + (truth.val | item), data=exp3)
+summary(ac.exp3)
+```
+
+Again, this is consistent with the original findings.
+
+Restricting to mouse users also replicates the original findings: 
+
+```{r}
+#What if we only look at mouse users?
+#EXPERIMENT 1
+ac.exp1.mouseonly <- lmer(ac ~ sentence.type*truth.val + (sentence.type*truth.val | subid) + (truth.val | item), data=subset(exp1, mouse.type=="mouse"))
+summary(ac.exp1.mouseonly)
+
+##EXPERIMENT 3
+ac.exp3.mouseonly <- lmer(ac ~ sentence.type*truth.val + (sentence.type*truth.val | subid) + (truth.val | item), data=subset(exp3, mouse.type == "mouse"))
+summary(ac.exp3.mouseonly)
+```
+
+### Comparing across the two "experiments" / conditions
+
+The original paper ran the two "conditions" reported here as two separate experiments.  If we really want to argue that context influences the processing of negation, though, we want to look at the three-way interaction between context condition, sentence type, and truth value.  
+
+```{r}
+##COMPARE BOTH EXPERIMENTS
+xf.compare <- lmer(xflips ~ sentence.type*truth.val*context.condition + (sentence.type+truth.val| subid) + (sentence.type+truth.val| item), data=sdata)
+summary(xf.compare)
+
+ac.compare <- lmer(ac ~ sentence.type*truth.val*context.condition + (sentence.type+truth.val| subid) + (sentence.type+truth.val| item), data=sdata)
+summary(ac.compare)
+
+rt.compare <- lmer(rt ~ sentence.type*truth.val*context.condition + (sentence.type+truth.val| subid) + (sentence.type+truth.val| item), data=sdata)
+summary(rt.compare)
+```
+
+The three-way interaction is maybe marginally significant for the x-flips measure, but not significant for AC or reaction time.  Maybe this would emerge with more participants?  
+
+Regarding differences between this experiment and the original, I think there are a lot of reasons that we needed more participants in our replication attempt compared to the original.  In addition to the mouse v. trackpad difference, it's also possible that things like mouse sensitivity have an effect. We might just need more participants in an online mouse tracking study to account for greater individual variability between participants when using sensitive measures like this.  
+
+
