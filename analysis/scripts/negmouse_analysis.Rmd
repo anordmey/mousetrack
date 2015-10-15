@@ -1,10 +1,12 @@
 ---
 title: "Dale & Duran 2011 Replication Analysis"
 author: "Ann E. Nordmeyer"
-output: html_document
+output: 
+  html_document:
+    toc: true
 ---
 
-## Getting Started 
+# Getting started
 
 Prelims and libraries.
 
@@ -14,6 +16,7 @@ library(lme4)
 library(ggplot2)
 library(dplyr)
 library(bootstrap)
+library(knitr)
 ```
 
 Functions for analysis.  Note that the Acceleration Components function may not be correct; the replication results in much higher AC scores than the original paper.  
@@ -151,9 +154,9 @@ sdata <- long.data %>%
   ungroup()
 ```
 
-## Plotting data
+# Plotting data
 
-### X-flips
+## X-flips
 
 First, compare original data to replication attempt for x-flips measure.  This is the number of times the trajectory changes direction along the x-axis.  
 
@@ -231,7 +234,7 @@ ggplot(ms.xf.mouse, aes(fill=truth.val, y=m, x=sentence.type)) +
 
 It looks like there might be a main effect (trackpad users have fewer xflips?) but unclear whether it influences the interaction we are interested in here.
 
-### Acceleration Components
+## Acceleration Components
 
 Now look at AC, the other primary measure reported in the original paper.  This shows the number of times that the trajectory sped up or slowed down.
 
@@ -306,7 +309,7 @@ ggplot(ms.ac.mouse, aes(fill=truth.val, y=m, x=sentence.type)) +
 
 It doesn't really look like it -- the data looks a little wonky, I think because there are some outliers in the AC measure (most get AC scores around 5-15, but a few have much higher scores) and there are so few trackpad participants.
 
-### Reaction Time
+## Reaction Time
 
 I collected "reaction time" scores, which was the time from the onset of the final word to the time that the participant selected true or false.  This was not reported in the original paper, so I don't have anything to compare it to.
 
@@ -335,7 +338,7 @@ ggplot(ms.rt, aes(fill=truth.val, y=m, x=sentence.type)) +
 
 Interestingly, it looks like RT does not have the expected effect -- it seems like there is the same interaction in the context condition, and participants were actually slower to respond in the context condition.  This could be because the context sentences were longer, and maybe took longer to process after reading the final word?
 
-## Mixed effects models
+# Mixed effects models
 
 These are all linear mixed-effects models with maximal random effects structure that converges.
 
@@ -349,17 +352,17 @@ exp1 <- subset(sdata, context.condition=="No Context")
 exp3 <- subset(sdata, context.condition=="Context")
 ```
 
-### X-flips
+## X-flips
 
 ```{r}
 ##X-FLIPS
 #EXPERIMENT 1
 xflips.exp1 <- lmer(xflips ~ sentence.type*truth.val + (sentence.type + truth.val | subid) + (truth.val | item), data=exp1)
-summary(xflips.exp1)
+kable(summary(xflips.exp1)$coefficients, digits = 3)
 
 #EXPERIMENT3
 xflips.exp3 <- lmer(xflips ~ sentence.type*truth.val + (sentence.type + truth.val | subid) + (truth.val | item), data=exp3)	
-summary(xflips.exp3)
+kable(summary(xflips.exp3)$coefficients, digits = 3)
 ```
 
 This is consistent with the original findings (with a larger sample size).  There is a significant interaction between truth value and sentence type in the no context condition, but not in the context condition.
@@ -369,25 +372,25 @@ What if we only look at mouse users, because original participants all used a mo
 ```{r}
 #EXPERIMENT 1
 xflips.exp1.mouseonly <- lmer(xflips ~ sentence.type*truth.val + (sentence.type + truth.val | subid) + (truth.val | item), data=subset(exp1, mouse.type == "mouse"))
-summary(xflips.exp1.mouseonly)
+kable(summary(xflips.exp1.mouseonly)$coefficients, digits = 3)
 
 #EXPERIMENT3
 xflips.exp3.mouseonly <- lmer(xflips ~ sentence.type*truth.val + (sentence.type + truth.val | subid) + (truth.val | item), data=subset(exp3, mouse.type == "mouse"))
-summary(xflips.exp3.mouseonly)
+kable(summary(xflips.exp3.mouseonly)$coefficients, digits = 3)
 ```
 
 The interaction is only marginally significant in the no context condition -- possibly because of smaller sample size with the trackpad participants removed, though this is still a larger N than in the original experiment.
 
-### Acceleration Components
+## Acceleration Components
 
 ```{r}
 #EXPERIMENT 1
 ac.exp1 <- lmer(ac ~ sentence.type*truth.val + (sentence.type*truth.val | subid) + (truth.val | item), data=exp1)
-summary(ac.exp1)
+kable(summary(ac.exp1)$coefficients, digits = 3)
 
 ##EXPERIMENT 3
 ac.exp3 <- lmer(ac ~ sentence.type*truth.val + (sentence.type*truth.val | subid) + (truth.val | item), data=exp3)
-summary(ac.exp3)
+kable(summary(ac.exp3)$coefficients, digits = 3)
 ```
 
 Again, this is consistent with the original findings.
@@ -398,27 +401,27 @@ Restricting to mouse users also replicates the original findings:
 #What if we only look at mouse users?
 #EXPERIMENT 1
 ac.exp1.mouseonly <- lmer(ac ~ sentence.type*truth.val + (sentence.type*truth.val | subid) + (truth.val | item), data=subset(exp1, mouse.type=="mouse"))
-summary(ac.exp1.mouseonly)
+kable(summary(ac.exp1.mouseonly)$coefficients, digits = 3)
 
 ##EXPERIMENT 3
 ac.exp3.mouseonly <- lmer(ac ~ sentence.type*truth.val + (sentence.type*truth.val | subid) + (truth.val | item), data=subset(exp3, mouse.type == "mouse"))
-summary(ac.exp3.mouseonly)
+kable(summary(ac.exp3.mouseonly)$coefficients, digits = 3)
 ```
 
-### Comparing across the two "experiments" / conditions
+## Comparing across the two "experiments" / conditions
 
 The original paper ran the two "conditions" reported here as two separate experiments.  If we really want to argue that context influences the processing of negation, though, we want to look at the three-way interaction between context condition, sentence type, and truth value.  
 
 ```{r}
 ##COMPARE BOTH EXPERIMENTS
 xf.compare <- lmer(xflips ~ sentence.type*truth.val*context.condition + (sentence.type+truth.val| subid) + (sentence.type+truth.val| item), data=sdata)
-summary(xf.compare)
+kable(summary(xf.compare)$coefficients, digits = 3)
 
 ac.compare <- lmer(ac ~ sentence.type*truth.val*context.condition + (sentence.type+truth.val| subid) + (sentence.type+truth.val| item), data=sdata)
-summary(ac.compare)
+kable(summary(ac.compare)$coefficients, digits = 3)
 
 rt.compare <- lmer(rt ~ sentence.type*truth.val*context.condition + (sentence.type+truth.val| subid) + (sentence.type+truth.val| item), data=sdata)
-summary(rt.compare)
+kable(summary(rt.compare)$coefficients, digits = 3)
 ```
 
 The three-way interaction is maybe marginally significant for the x-flips measure, but not significant for AC or reaction time.  Maybe this would emerge with more participants?  
