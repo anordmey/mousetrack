@@ -84,7 +84,7 @@ long.data2$subid <- paste(as.character(long.data2$subid),"b",sep="")
 long.data <- rbind(long.data1, long.data2)
 ```
 
-One critical difference between this replication attempt and the original paper is that the replication was run online (MTurk).  We asked about whether participants used a mouse, trackpad, or some other tool to move the cursor.  Here I remove participants who selected "other" on that question.  I'm leaving trackpad users in for now.
+We asked about whether participants used a mouse, trackpad, or some other tool to move the cursor.  Here I remove participants who selected "other" on that question.  I'm leaving trackpad users in for now.  I'm not sure if the original study included trackpad users or not.  
 
 ```{r}
 long.data <- subset(long.data, mouse.type != "\"Other\"")
@@ -125,6 +125,9 @@ qplot(y=y, x=x, linetype=sentence.type, color=truth.val,
 Some final exclusion criteria based on what was used in the paper (remove participants with less than 80% correct, then remove incorrect trials and trials with motion times 3x higher than the sd).
 
 ```{r}
+#Initial N: 
+aggregate(subid ~ context.condition, long.data, n.unique)
+
 ##Exclusion criteria
 long.data <- long.data %>%
   group_by(subid) %>% 
@@ -139,6 +142,7 @@ long.data <- long.data %>%
 ##Final Ns:
 aggregate(subid ~ context.condition, long.data, n.unique)
 ```
+Note that I excluded a lot more participants than were excluded in the original studies.  
 
 Calculate Xflips and Acceleration Components, the two primariy analyses from the original paper.  
 
@@ -426,6 +430,6 @@ kable(summary(rt.compare)$coefficients, digits = 3)
 
 The three-way interaction is maybe marginally significant for the x-flips measure, but not significant for AC or reaction time.  Maybe this would emerge with more participants?  
 
-Regarding differences between this experiment and the original, I think there are a lot of reasons that we needed more participants in our replication attempt compared to the original.  In addition to the mouse v. trackpad difference, it's also possible that things like mouse sensitivity have an effect. We might just need more participants in an online mouse tracking study to account for greater individual variability between participants when using sensitive measures like this.  
+Regarding differences between this experiment and the original, I think there are a lot of reasons that we needed more participants in our replication attempt compared to the original.  I don't know if the original experiment included trackpad users, though it isn't clear that would account for the difference.  I did have to exclude a lot more participants due to errors than in the original study, so it does seem like my data were less clean for whatever reason (unclear what those reasons might be -- maybe we used different criteria for recruiting?  I set a cutoff of 85% minimum previous hits approved; if you used a higher cutoff that might account for some of the increased variance in my sample).  Maybe the directions differed?  I think we might need more participants to get consistently reliable mousetracking data online, but the benefits of being able to run the study online instead of in the lab seem worth it to me.
 
 
